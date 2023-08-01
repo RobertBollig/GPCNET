@@ -25,6 +25,12 @@
 
 #define NUM_NETWORK_TESTS 8
 
+int RSEED=-10;
+int FileSync=0;
+int debugLock=0;
+int tblsize=80;
+int verbose=0;
+
 /* loop counts for the various tests */
 #define NUM_LAT_TESTS 10000
 #define NUM_LAT_RANDS 30
@@ -126,6 +132,46 @@ int main(int argc, char* argv[])
 
      init_mpi(&test_config, &nodes, &argc, &argv, BW_MSG_COUNT, BW_MSG_COUNT, A2A_MSG_COUNT,
               1, 1, 1, BW_OUTSTANDING);
+
+     /* Set up verbosity*/
+     if (getenv("VERBOSE")) {
+         verbose=atoi(getenv("VERBOSE"));
+         if (verbose) {
+             tblsize=VTBLSIZE;
+             if (test_config.myrank == 0) {
+                 printf("Verbose output is enabled.\n\n");
+             }
+         }
+     }
+
+     /* Set up the random seed from environment variables */
+     if (getenv("RSEED")) {
+         RSEED=atoi(getenv("RSEED"));
+         if (test_config.myrank == 0) {
+             printf("RSEED is taken from environment\n");
+             printf("RSEED=%d\n", RSEED);
+         }
+     } else {
+         if (test_config.myrank == 0) {printf("Random seed is truly random.\n");}
+     }
+
+     /* last we initialize the pretty table row separators */
+     table_outerbar[tblsize] = '\0';
+     table_innerbar[tblsize] = '\0';
+     print_buffer[tblsize]   = '\0';
+     for (i = 0; i < tblsize; i++) {
+          table_outerbar[i] = '-';
+          table_innerbar[i] = '-';
+          print_buffer[i]   = '\0';
+     }
+     table_outerbar[0] = '+';
+     table_outerbar[tblsize-1] = '+';
+     table_innerbar[0] = '+';
+     table_innerbar[tblsize-1] = '+';
+     table_innerbar[34] = '+';
+     for (i = 1; i < 3+verbose*4; i++) {
+         table_innerbar[34+i*15] = '+';
+     }
 
      if (nodes.nnodes < 2) {
           if (test_config.myrank == 0) {

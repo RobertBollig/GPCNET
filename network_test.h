@@ -23,19 +23,34 @@
 #include <time.h>
 #include <stdint.h>
 
-#define RSEED 8675309
+//#define RSEED 8675309
+extern int RSEED;
 
 /* these establish the size of the table written to STDOUT */
+#define VTBLSIZE 140
 /*#ifdef VERBOSE
 #define TBLSIZE 140
 #else
 #define TBLSIZE 80
 #endif
-char table_outerbar[TBLSIZE+1], table_innerbar[TBLSIZE+1], print_buffer[TBLSIZE+1];
 */
+char table_outerbar[VTBLSIZE+1], table_innerbar[VTBLSIZE+1], print_buffer[VTBLSIZE+1];
+
 
 /* define a timeout for how long a test can run */
 #define TEST_TIMEOUT_SECS 10.0
+
+extern int NUM_CONGESTOR_TESTS;
+
+/* Variable to enable syncing via File lock */
+extern int fileSync;
+extern int allTest;
+extern int allCong;
+extern int debugLock;
+extern int verbose;
+extern int tblsize;
+
+#define USLEEPTIME 100
 
 typedef struct CommRank_st {
      int rank;
@@ -149,6 +164,9 @@ int congestion_subcomms(CommConfig_t *config, CommNodes_t *nodes, int *congestor
                         int list_size, int *am_congestor, MPI_Comm *subcomm);
 
 /* utils.c */
+void createLock(const char* filename);
+int checkLock  (const char* filename);
+void waitLock  (const char* filename);
 void die(char *errmsg);
 void mpi_error(int ierr);
 int init_mpi(CommConfig_t *config, CommNodes_t *nodes, int *argc, char ***argv, int rmacnt,

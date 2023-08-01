@@ -18,14 +18,34 @@
 #include <stdio.h>
 #include <string.h>
 #include <network_test.h>
+#include <unistd.h>
 
-/* these establish the size of the table written to STDOUT */
-#ifdef VERBOSE
-#define TBLSIZE 140
-#else
-#define TBLSIZE 80
-#endif
-char table_outerbar[TBLSIZE+1], table_innerbar[TBLSIZE+1], print_buffer[TBLSIZE+1];
+void createLock(const char* filename) {
+    if (debugLock) printf("Creating %s.\n",filename);
+    FILE *lock = fopen(filename,"w");
+    fclose(lock);
+    if (debugLock) printf("Waiting for %s deletion.\n",filename);
+    double t0=MPI_Wtime();
+    while (checkLock(filename)) {
+        usleep(USLEEPTIME);
+    }
+    if (debugLock) printf("%s deleted after %f s-> continuing\n", filename,MPI_Wtime()-t0);
+}
+
+int checkLock(const char* filename) {
+    return (access(filename, F_OK)+1);
+}
+
+void waitLock(const char* filename) {
+    /* Wait until the release file has been created */
+    if (debugLock) printf("Waiting for %s creation.\n",filename);
+    double t0=MPI_Wtime();
+    while (!checkLock(filename)) {
+        usleep(USLEEPTIME);
+    }
+    if (debugLock) printf("%s found after %f s -> Deleting\n", filename, MPI_Wtime()-t0);
+    remove(filename);
+}
 
 void die(char* errmsg)
 {
@@ -182,27 +202,6 @@ int init_mpi(CommConfig_t *config, CommNodes_t *nodes, int *argc, char ***argv, 
      }
      memset(config->p2p_buffer, 0, p2p_length);
 
-     /* last we initialize the pretty table row separators */
-     table_outerbar[TBLSIZE] = '\0';
-     table_innerbar[TBLSIZE] = '\0';
-     print_buffer[TBLSIZE]   = '\0';
-     for (i = 0; i < TBLSIZE; i++) {
-          table_outerbar[i] = '-';
-          table_innerbar[i] = '-';
-          print_buffer[i]   = '\0';
-     }
-     table_outerbar[0] = '+';
-     table_outerbar[TBLSIZE-1] = '+';
-     table_innerbar[0] = '+';
-     table_innerbar[TBLSIZE-1] = '+';
-     table_innerbar[34] = '+';
-#ifdef VERBOSE
-     for (i = 1; i < 7; i++) {
-#else
-     for (i = 1; i < 3; i++) {
-#endif
-          table_innerbar[34+i*15] = '+';
-     }
      return 0;
 }
 
@@ -352,21 +351,21 @@ int print_results(CommConfig_t *config, int localrank, int havedata, int from_mi
      if (havedata && localrank == 0) {
           double avgworst = results->avgmin;
           if (from_min) avgworst = results->avgmax;
-#ifdef VERBOSE
-          snprintf(print_buffer, TBLSIZE+1, "| %31.31s | %12.1f | %12.1f | %12.1f | %12.1f | %12.1f | %12.1f | %12.12s |",
-                   name, results->minval, results->maxval, results->avg, avgworst, results->percentile_99,
-                   results->percentile_999, units);
-#else
-          snprintf(print_buffer, TBLSIZE+1, "| %31.31s | %12.1f | %12.1f | %12.12s |",
-                   name, results->avg, results->percentile_99, units);
-#endif
+          if (verbose) {
+              snprintf(print_buffer, tblsize+1, "| %31.31s | %12.1f | %12.1f | %12.1f | %12.1f | %12.1f | %12.1f | %12.12s |",
+                       name, results->minval, results->maxval, results->avg, avgworst, results->percentile_99,
+                       results->percentile_999, units);
+          } else {
+              snprintf(print_buffer, tblsize+1, "| %31.31s | %12.1f | %12.1f | %12.12s |",
+                       name, results->avg, results->percentile_99, units);
+          }
      }
 
      /* if we are not comm_world rank 0 and we have forward it to comm_world rank 0 */
      if (localrank == 0 && havedata && config->myrank != 0 ) {
-          mpi_error(MPI_Send(print_buffer, TBLSIZE, MPI_CHAR, 0, 511, MPI_COMM_WORLD));
+          mpi_error(MPI_Send(print_buffer, tblsize, MPI_CHAR, 0, 511, MPI_COMM_WORLD));
      } else if (config->myrank == 0 && (localrank != 0 || ! havedata)) {
-          mpi_error(MPI_Recv(print_buffer, TBLSIZE, MPI_CHAR, MPI_ANY_SOURCE, 511, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
+          mpi_error(MPI_Recv(print_buffer, tblsize, MPI_CHAR, MPI_ANY_SOURCE, 511, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
      }
 
      if (config->myrank == 0) {
@@ -393,14 +392,14 @@ int print_comparison_results(CommConfig_t *config, int localrank, int havedata, 
 
           double slowdown99  = (from_min) ? atof(n99) / atof(b99) : atof(b99) / atof(n99);
           double slowdownavg = (from_min) ? atof(navg) / atof(bavg) : atof(bavg) / atof(navg);
-          snprintf(print_buffer, TBLSIZE+1, "| %31.31s | %19.1fX | %18.1fX |", name, slowdownavg, slowdown99);
+          snprintf(print_buffer, tblsize+1, "| %31.31s | %19.1fX | %18.1fX |", name, slowdownavg, slowdown99);
      }
 
      /* if we are not comm_world rank 0 and we have forward it to comm_world rank 0 */
      if (localrank == 0 && havedata && config->myrank != 0 ) {
-          mpi_error(MPI_Send(print_buffer, TBLSIZE, MPI_CHAR, 0, 512, MPI_COMM_WORLD));
+          mpi_error(MPI_Send(print_buffer, tblsize, MPI_CHAR, 0, 512, MPI_COMM_WORLD));
      } else if (config->myrank == 0 && (localrank != 0 || ! havedata)) {
-          mpi_error(MPI_Recv(print_buffer, TBLSIZE, MPI_CHAR, MPI_ANY_SOURCE, 512, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
+          mpi_error(MPI_Recv(print_buffer, tblsize, MPI_CHAR, MPI_ANY_SOURCE, 512, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
      }
 
      if (config->myrank == 0) {
@@ -419,17 +418,17 @@ int print_header(CommConfig_t *config, int type, CommTest_t ntype)
      if (config->myrank == 0) {
           if (type < 3) printf("\n%s\n",table_outerbar);
           if (type == 0) {
-#ifdef VERBOSE
-               printf("| %57.57s%22.22s%57.57s |\n", " ", "Isolated Network Tests", " ");
-#else
-               printf("| %27.27s%22.22s%27.27s |\n", " ", "Isolated Network Tests", " ");
-#endif
+              if (verbose) {
+                  printf("| %57.57s%22.22s%57.57s |\n", " ", "Isolated Network Tests", " ");
+              } else {
+                  printf("| %27.27s%22.22s%27.27s |\n", " ", "Isolated Network Tests", " ");
+              }
           } else if (type == 1) {
-#ifdef VERBOSE
-               printf("| %55.55s%25.25s%56.56s |\n", " ", "Isolated Congestion Tests", " ");
-#else
-               printf("| %25.25s%25.25s%26.26s |\n", " ", "Isolated Congestion Tests", " ");
-#endif
+              if (verbose){
+                  printf("| %55.55s%25.25s%56.56s |\n", " ", "Isolated Congestion Tests", " ");
+              } else {
+                  printf("| %25.25s%25.25s%26.26s |\n", " ", "Isolated Congestion Tests", " ");
+              }
           } else if (type == 2) {
 
                int nl=64;
@@ -466,11 +465,11 @@ int print_header(CommConfig_t *config, int type, CommTest_t ntype)
                     break;
                }
 
-#ifdef VERBOSE
-               printf("| %28.28s%43.43s (%20s Network Test)%29s |\n", " ", "Network Tests running with Congestion Tests", nname, " ");
-#else
-               printf("| %16.16s%43.43s%17.17s |\n", " ", "Network Tests running with Congestion Tests", " ");
-#endif
+               if (verbose) {
+                   printf("| %28.28s%43.43s (%20s Network Test)%29s |\n", " ", "Network Tests running with Congestion Tests", nname, " ");
+               } else {
+                   printf("| %16.16s%43.43s%17.17s |\n", " ", "Network Tests running with Congestion Tests", " ");
+               }
           } else if (type == 3) {
 
                printf("\n+------------------------------------------------------------------------------+\n");
@@ -486,13 +485,13 @@ int print_header(CommConfig_t *config, int type, CommTest_t ntype)
 
           if (type < 3) {
                printf("%s\n",table_innerbar);
-#ifdef VERBOSE
-               printf("| %31.31s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s |\n",
-                      "Name", "Min", "Max", "Avg", "Avg(Worst)", "99%", "99.9%", "Units");
-#else
-               printf("| %31.31s | %12.12s | %12.12s | %12.12s |\n",
-                      "Name", "Avg", "99%", "Units");
-#endif
+               if (verbose) {
+                   printf("| %31.31s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s | %12.12s |\n",
+                           "Name", "Min", "Max", "Avg", "Avg(Worst)", "99%", "99.9%", "Units");
+               } else {
+                   printf("| %31.31s | %12.12s | %12.12s | %12.12s |\n",
+                          "Name", "Avg", "99%", "Units");
+               }
                printf("%s\n",table_innerbar);
           }
           fflush(stdout);
@@ -797,9 +796,7 @@ int summarize_pairs_performance(CommConfig_t *config, MPI_Comm comm, char *lnode
      char *all_perf_strs;
      struct timespec timestmp;
 
-#ifndef VERBOSE
-     return 0;
-#else
+     if (verbose) {
 
      mpi_error(MPI_Comm_size(comm, &nranks));
      mpi_error(MPI_Comm_rank(comm, &myrank));
@@ -918,9 +915,8 @@ int summarize_pairs_performance(CommConfig_t *config, MPI_Comm comm, char *lnode
      if (myrank == 0) {
           free(all_perf_strs);
      }
-
+     }
      return 0;
-#endif
 }
 
 /* create a file with the distribution of hires measurements */
@@ -931,21 +927,19 @@ int write_distribution(CommTest_t req_test, CommTest_t other_test, int isbaselin
      FILE *fp;
      char *fname;
 
-#ifndef VERBOSE
-     return 0;
-#else
+     if (verbose) {
 
-     create_perf_filename(req_test, other_test, isbaseline, "dat", &fname);
+         create_perf_filename(req_test, other_test, isbaseline, "dat", &fname);
 
-     fp = fopen(fname, "w+");
-     fprintf(fp, "%22.22s%20.20s\n", " ", tname);
-     fprintf(fp, "%20.20s %20.20s %20.20s\n", "Bin", tunits, "count");
-     for (i = 0; i < results->ndist_buckets; i++) {
-          fprintf(fp, "%20i %20.5f %20lu\n", i, (results->dlow+i*results->dres), results->distribution[i]);
+         fp = fopen(fname, "w+");
+         fprintf(fp, "%22.22s%20.20s\n", " ", tname);
+         fprintf(fp, "%20.20s %20.20s %20.20s\n", "Bin", tunits, "count");
+         for (i = 0; i < results->ndist_buckets; i++) {
+              fprintf(fp, "%20i %20.5f %20lu\n", i, (results->dlow+i*results->dres), results->distribution[i]);
+         }
+         fclose(fp);
+         free(fname);
+
+         return 0;
      }
-     fclose(fp);
-     free(fname);
-
-     return 0;
-#endif
 }
